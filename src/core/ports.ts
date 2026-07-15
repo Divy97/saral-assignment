@@ -1,3 +1,5 @@
+import type { Readable } from "node:stream";
+
 export type Job =
   | { type: "SYNC_TOP" }
   | { type: "SYNC_RECENT" }
@@ -11,6 +13,8 @@ export interface Queue {
 }
 
 export interface Storage {
-  put(key: string, body: Buffer, contentType: string): Promise<void>;
+  // body is a stream, not a Buffer — assets stream download -> disk without ever
+  // holding the whole file in memory (matters for large videos).
+  put(key: string, body: Readable, contentType: string): Promise<void>;
   getUrl(key: string): string;   // pure function of the adapter — read API calls this
 }
