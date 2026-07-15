@@ -58,6 +58,11 @@ log `META token missing — add token to .env` and skip.
   option on the consumer, or splitting into a serial *sync* queue + a parallel *asset*
   queue (two SQS queues + two Lambdas in prod). Not built — one worker is sufficient
   at assignment scale.
+- **Local storage atomic write assumes a single writer.** `put` streams to a fixed
+  `{key}.tmp` then renames (atomic publish). Safe with one worker — one write per key
+  at a time. With multiple workers, SQS at-least-once redelivery could have two writers
+  hit the same temp file and corrupt it; the fix is a unique suffix (`{key}.{uuid}.tmp`).
+  One-line change, deferred alongside the single-worker decision.
 
 ## ai-usage
 
