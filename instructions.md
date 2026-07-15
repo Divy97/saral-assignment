@@ -1,8 +1,8 @@
 # Instructions
 
 Hashtag tracking pipeline for Instagram `matcha` media. Full architecture and  
-decision record: [docs/DESIGN.md](docs/DESIGN.md).  
-ai usage : how I used AI (`[instructions.md#ai-usage](./instructions.md#ai-usage)`) plus the exported chat history: [brainstorming](./docs/ai-usage/brain_storming.txt)  and[implementation](./docs/ai-usage/implementation.txt)
+decision record: [docs/DESIGN.md](docs/DESIGN.md). AI usage and chat exports are in
+the [ai-usage](#ai-usage) section below.
 
 ## setup
 
@@ -30,11 +30,12 @@ log `META token missing — add token to .env` and skip.
 
 | Var                 | Stage      | Purpose                                                  |
 | ------------------- | ---------- | -------------------------------------------------------- |
-| `STAGE`             | both       | `local`                                                  |
+| `STAGE`             | both       | Selects adapters: `local` or `production`. Use `local`   |
 | `PORT`              | both       | HTTP port (default 3000)                                 |
 | `DATABASE_URL`      | both       | Postgres connection string                               |
 | `META_ACCESS_TOKEN` | both       | Instagram page token; absent → syncs skip                |
 | `META_USER_ID`      | both       | IG business `user_id` for hashtag search                 |
+| `HASHTAG`           | both       | Hashtag to track (default `matcha`)                      |
 | `SYNC_CRON`         | local      | Recent-sync schedule (default `0 */3 * * *`)             |
 | `MEDIA_DIR`         | local      | Local asset directory                                    |
 | `PUBLIC_BASE_URL`   | local      | Base for deriving `storage_url` from `storage_key`       |
