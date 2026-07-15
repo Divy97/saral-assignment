@@ -60,7 +60,7 @@ src/
   entrypoints/
     local.ts                # Express + node-cron + in-process poll loop
     lambda/
-      scheduler.ts          # EventBridge -> enqueue SYNC_RECENT
+      scheduler.ts          # EventBridge -> runRecentSync directly (not via the queue)
       worker.ts             # SQS -> runRecentSync / asset handler
       api.ts                # API Gateway -> Express via serverless-http
 ```
@@ -125,16 +125,22 @@ Two-phase, because fetching metadata and transferring binaries are different
 failure domains and shouldn't share a fate.
 
 ```
-node-cron / EventBridge (every 3h)
-  └─ enqueue SYNC_RECENT
-       └─ worker: paginate recent_media newest-first (cap 500)
+node-cron (local) / EventBridge (prod), every 3h
+  └─ runRecentSync — called DIRECTLY, not via the queue
+       └─ paginate recent_media newest-first (cap 500)
             └─ per page: upsert metadata rows (fill-forward), commit
-                 └─ per new/incomplete media with a URL: enqueue FETCH_ASSET
-                      └─ worker: download -> upload -> UPDATE row (storage_key, done)
-                           └─ on failure: retry -> DLQ -> asset_status = failed
+                 └─ per new/incomplete media with a URL: enqueue FETCH_ASSET  ← the only thing on the queue
+                      └─ asset worker: download -> upload -> UPDATE row (storage_key, done)
+                           └─ on failure: mark asset_status = failed (no auto-retry)
 ```
 
-Top media is synced once on startup (`SYNC_TOP`), recent media every 3h.
+Top media is synced once on startup, recent media every 3h.
+
+**The queue carries only `FETCH_ASSET`.** Syncs are triggered by the scheduler and run
+directly (a plain function call), so a long sync never blocks asset downloads behind it and
+a big download never blocks a sync — with a single worker, routing syncs through the queue
+would serialize them. In prod the same shape holds: EventBridge triggers the sync directly;
+SQS carries only the asset jobs.
 
 ### Per-page commit
 

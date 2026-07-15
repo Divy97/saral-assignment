@@ -1,9 +1,8 @@
 import type { Readable } from "node:stream";
 
-export type Job =
-  | { type: "SYNC_TOP" }
-  | { type: "SYNC_RECENT" }
-  | { type: "FETCH_ASSET"; mediaId: string };
+// The queue carries only asset-download jobs. Syncs run directly (boot / cron), never via
+// the queue — so a long sync can't block asset downloads behind it, and vice versa.
+export type Job = { type: "FETCH_ASSET"; mediaId: string };
 
 export interface Queue {
   enqueue(job: Job): Promise<void>;
