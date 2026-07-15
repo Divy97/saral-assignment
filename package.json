@@ -7,7 +7,7 @@
   "scripts": {
     "start": "pnpm migrate:up && node dist/entrypoints/local.js",
     "dev": "tsx watch src/entrypoints/local.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "migrate:up": "node-pg-migrate up -m src/db/migrations",

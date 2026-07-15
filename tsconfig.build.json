@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  // build only: keep tests (and emitted output) out of dist/.
+  // The base config still includes tests so `pnpm typecheck` and the editor cover them.
+  "exclude": ["**/*.test.ts", "node_modules", "dist"]
+}

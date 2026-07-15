@@ -52,6 +52,12 @@ log `META token missing — add token to .env` and skip.
 - **Carousel children not fetched.** Only the cover image (`media_url`) is stored.
 - **Engagement counts are latest-value only.** No history/time-series.
 - **No Meta fixture/replay.** Real API when a token is present; skip + log otherwise.
+- **Single worker, one queue.** Assets download serially — a slow video blocks the
+  jobs behind it, but this only delays *asset availability*, never metadata (committed
+  per page) or the read API. Scaling is additive, not a redesign: a `concurrency`
+  option on the consumer, or splitting into a serial *sync* queue + a parallel *asset*
+  queue (two SQS queues + two Lambdas in prod). Not built — one worker is sufficient
+  at assignment scale.
 
 ## ai-usage
 
