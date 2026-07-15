@@ -159,8 +159,10 @@ Re-syncs overlap heavily (recent_media is a rolling ~24h window). The
 ### Idempotency (SQS is at-least-once)
 
 - Metadata: upsert on `media_id`.
-- Asset: deterministic key `media/{media_id}.{ext}` — a re-run overwrites the same
-  object, no orphans. Skip early if `asset_status = 'done'`.
+- Asset: deterministic key `{media_id}.{ext}` (the file name) — a re-run overwrites
+  the same object, no orphans. Skip early if `asset_status = 'done'`. Locally the key
+  is served under `/media/<key>`; on S3 it's the object key. `storage_key` in the DB
+  holds the key; `Storage.getUrl(key)` resolves the URL per adapter at read time.
 - Extension / content-type derived from the download response `Content-Type`
   header, not from `media_type`.
 
