@@ -12,11 +12,11 @@ describe("InMemoryQueue", () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     queue.consume(handler);
 
-    await queue.enqueue({ type: "SYNC_RECENT" });
+    await queue.enqueue({ type: "FETCH_ASSET", mediaId: "1" });
     await tick();
 
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler).toHaveBeenCalledWith({ type: "SYNC_RECENT" });
+    expect(handler).toHaveBeenCalledWith({ type: "FETCH_ASSET", mediaId: "1" });
   });
 
   it("retries a failing job up to maxReceives, then stops (dead-letters)", async () => {
