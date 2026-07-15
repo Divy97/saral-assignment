@@ -7,7 +7,7 @@ import { runTopSync, runRecentSync, type SyncContext } from "../core/services/sy
 import { handleFetchAsset } from "../core/services/asset.js";
 import type { MetaConfig } from "../core/meta/meta-client.js";
 
-const deps = buildDeps(); // reads STAGE once -> { stage, pool, queue, storage }
+const deps = await buildDeps(); // reads STAGE once -> { stage, pool, queue, storage }
 
 const meta: MetaConfig = {
   accessToken: process.env.META_ACCESS_TOKEN ?? "",

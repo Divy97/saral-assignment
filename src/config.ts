@@ -21,11 +21,18 @@ function getStage(): Stage {
   return stage;
 }
 
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`missing required env var: ${name}`);
+  return value;
+}
+
 /**
- * The composition root — the ONLY place STAGE is read. Builds the swappable adapters
- * and hands them back; every consumer takes the interfaces, never the env.
+ * The composition root — the ONLY place STAGE is read. Builds the swappable adapters and
+ * hands them back; every consumer takes the interfaces, never the env. Async because the
+ * production adapters are dynamically imported, so the AWS SDK never loads on the local path.
  */
-export function buildDeps(): Deps {
+export async function buildDeps(): Promise<Deps> {
   const stage = getStage();
 
   if (stage === "local") {
@@ -40,8 +47,16 @@ export function buildDeps(): Deps {
     };
   }
 
-  // production: SqsQueue + S3Storage. Not wired yet — those adapters land in a later
-  // branch, and will be dynamically imported here so the AWS SDK stays out of the
-  // local path.
-  throw new Error("production adapters (SQS/S3) are not wired yet");
+  // production — dynamic import keeps @aws-sdk/* out of the local bundle/startup path.
+  const [{ SqsQueue }, { S3Storage }] = await Promise.all([
+    import("./adapters/aws/sqs-queue.js"),
+    import("./adapters/aws/s3-storage.js"),
+  ]);
+  const region = requireEnv("AWS_REGION");
+  return {
+    stage,
+    pool,
+    queue: new SqsQueue({ queueUrl: requireEnv("SQS_QUEUE_URL"), region }),
+    storage: new S3Storage({ bucket: requireEnv("S3_BUCKET"), region }),
+  };
 }
