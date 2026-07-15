@@ -1,0 +1,1128 @@
+╭─── Claude Code v2.1.209 ─────────────────────────────────────────────────────╮
+│                                           │ Tips for getting started         │
+│             Welcome back Divy!            │ Ask Claude to create a new app … │
+│                                           │ ──────────────────────────────── │
+│                  ▐▛███▜▌                  │ What's new                       │
+│                 ▝▜█████▛▘                 │ Fixed /model and other dialogs … │
+│                   ▘▘ ▝▝                   │ Added screen reader mode: opt-i… │
+│                                           │ Added `vimInsertModeRemaps` set… │
+│     Opus 4.8                              │ /release-notes for more          │
+│   ~/Developer/personal/saral-assignment   │                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+❯ I need help with an assignment. problem statment is in @problem-statement.md  
+                                                                                
+  So as far as I understand the problem the problem is pretty straightforward   
+  We will get the hashtag ID and from that hashtag ID we need to fetch the      
+  media And view the data we have to add the data into the Postgres you also    
+  have to upload the media into some sort of storage and get the URL and at the 
+  end we want the paginated read-only API which returns the newest first data   
+  right other than that there is one more thing we have to Resync the data      
+  every 3 hours. Yeah, I think the problem is pretty self-explanatory. Before   
+  we jump into the problem, I want to clear one thing about the text text. So,  
+  if you read the problem statement file, there is two options to go with. one  
+  is local which is in-memory node-cron and the local file storage. The other   
+  one is AWS stack, which would be SQS, S3 and Lambda. I'm a little bit         
+  confused here. So if we use the local stack, then it would be easier for the  
+  assignment checker to run the app, maybe using Docker Compose. But I am       
+  familiar with the AWS stack. So I'm leaning towards that we must use AWS.     
+  Let's discuss about what way to choose here. I'm leaning towards AWS more     
+  because that will show that we also know the AWS, but Docker thing looks      
+  easier for everyone. For us to develop as well and for them to review as      
+  well.                                                                         
+  ⎿  Read problem-statement.md (127 lines)
+
+⏺ Go local-first with a clean adapter boundary. That's not the safe choice —
+  it's the one the assignment is literally grading. Here's the reasoning, then
+  the call.
+
+  What they're actually testing
+
+  The problem statement says it outright:
+
+  ▎ "The important part is that your code should be structured so local 
+  ▎ implementations can later be replaced with AWS implementations."
+
+  They don't care whether you deploy to AWS. They care whether you can draw the
+  seam — a Queue, Storage, and Scheduler interface with swappable
+  implementations. Hard-wiring the AWS SDK actually demonstrates less
+  engineering judgment than a clean port/adapter layer, because it couples your
+  domain logic to a vendor.
+
+  The reviewability problem with AWS
+
+  Three reviewers (saral-kalwani, pranav-getsaral, nivekithan-saral) will clone
+  and run. Full AWS means they need: an account, IAM creds, a real S3 bucket, an
+  SQS queue, a deployed Lambda + EventBridge rule. That's provisioning friction
+  on their side for a take-home. Anything they can't run in 5 minutes hurts the
+  submission — and setup ease is an explicit deliverable.
+
+  The move that wins both
+
+  Local by default, AWS as a documented adapter:
+
+  - docker compose up → Postgres + app. Reviewer runs it in one command.
+  - Domain code depends on Queue, Storage, Scheduler interfaces — never on the
+  SDK directly.
+  - Ship InMemoryQueue, LocalFileStorage, NodeCronScheduler as the running
+  defaults.
+  - Ship SqsQueue, S3Storage as real adapter classes (thin, using @aws-sdk/*),
+  selected by an env var. They compile and demonstrate the AWS knowledge — they
+  just aren't required to boot the app.
+
+  You prove you know AWS by the shape of the S3/SQS adapters and a short note in
+  instructions.md, not by forcing anyone to provision it.
+
+  One flag before you build
+
+  The problem statement has access_token: NA and user_id: NA. There's no live
+  Meta access. Confirm whether real credentials get provided separately — if
+  not, you'll need a recorded/fixture response for the ingestion path so the
+  pipeline is runnable end-to-end. Either way the adapter design above is
+  unaffected.
+
+  Recommendation: local-first + adapter seam + AWS adapter classes 
+  shipped-but-optional. Want me to sketch the interface boundary and the Docker
+  Compose setup next?
+
+✻ Cooked for 31s
+
+❯ problem statement has access_token: NA and user_id: NA -- i do have access.   
+                                                                                
+  Yeah, I agree. Yes, we have to make this local first so other people can run  
+  the code and check. Let me clear up. So earlier I was thinking that we can    
+  integrate local stack or any other AWS emulator so they can easily run and we 
+  don't have to write the two different like one for local and one for AWS I    
+  mean with AWS SDKs but now I think it would be better if we have a single a   
+  simple stage variable in env it would be like local or production so if we    
+  are running it locally we will use in-memory db and we will use node-cron     
+  local storage but if the flag is production we will do the same thing but the 
+  code will be running off with aws sdk i think we might face some issue just   
+  in like in memory queue and sqs because the behavior would be a bit different 
+  but i think like other things like local storage or S3 simple node processes  
+  we can easily handle right do you see any issue in this approach to           
+  summarize I just want to use one stage variable which will have the value     
+  local or production and according to that we will decide that the text that   
+  would be local or of AWS.                                                     
+
+⏺ The single-flag approach is right. Two real issues, one non-issue, and one
+  rule to keep it clean.
+
+  The flag should branch exactly once
+
+  STAGE reads in one place — a composition root / factory that builds the
+  concrete Queue, Storage, Scheduler and injects them. If if (stage === 
+  'production') shows up scattered across services, you've lost the whole
+  benefit. Everything downstream takes the interface, never reads the env. Get
+  this wrong and the adapter seam is theater.
+
+  Issue 1 — queue semantics (you're right to worry)
+
+  This is the only genuinely hard divergence:
+
+  ┌──────────────────────┬────────────────────────┬─────────────────────────┐
+  │                      │       In-memory        │           SQS           │
+  ├──────────────────────┼────────────────────────┼─────────────────────────┤
+  │ Delivery             │ exactly-once (same     │ at-least-once — dupes   │
+  │                      │ process)               │ happen                  │
+  ├──────────────────────┼────────────────────────┼─────────────────────────┤
+  │ Consumer             │ in-process function    │ poll loop / Lambda      │
+  │                      │ call                   │ trigger                 │
+  ├──────────────────────┼────────────────────────┼─────────────────────────┤
+  │ Retry / visibility   │ none unless you build  │ built-in                │
+  │ timeout              │ it                     │                         │
+  ├──────────────────────┼────────────────────────┼─────────────────────────┤
+  │ Failure              │ lost on crash          │ redriven, DLQ           │
+  └──────────────────────┴────────────────────────┴─────────────────────────┘
+
+  Design the interface to the lowest common denominator: enqueue(msg) is
+  fire-and-forget async, and a consumer polls (receive → handle → ack/delete).
+  The local version runs an in-process poll loop over an array so it behaves
+  like SQS, not like a direct call. If you make local a synchronous await 
+  handler(), prod will surprise you.
+
+  The dupe problem solves itself: make the handler idempotent — INSERT ... ON 
+  CONFLICT (media_id) DO UPDATE. You need that anyway for the "avoid duplicate
+  media" requirement. So SQS at-least-once costs you nothing extra. Two
+  requirements, one mechanism.
+
+  Issue 2 — the scheduler is NOT an SDK swap
+
+  node-cron runs inside your long-lived Express process. EventBridge→Lambda is a
+  different execution topology invoked from outside — not something you toggle
+  with an SDK client in the same running app. So be honest about what
+  "production" means:
+
+  - Cleanest: production still = one Express process, just with SQS + S3
+  adapters. node-cron stays in both. You've structured for Lambda (the sync job
+  is a plain function the cron calls) without pretending a flag deploys it.
+  - Don't wire up an actual Lambda/EventBridge deploy unless the reviewers ask.
+  That's infra work the assignment doesn't need, and it can't run in Docker
+  Compose anyway.
+
+  Say this plainly in instructions.md under tradeoffs: "Scheduling is node-cron
+  in both stages; the sync job is isolated as a handler so it drops into Lambda
+  unchanged." That reads as judgment, not a gap.
+
+  Non-issue — storage
+
+  Correct, this is trivial. Interface is put(key, buffer, contentType) → url.
+  Local writes to ./media and returns http://localhost/media/...; S3 uploads and
+  returns the object URL. Clean swap, no semantic gap.
+
+  Net
+
+  Single STAGE flag: yes. Guardrails:
+  1. Flag branches in one factory; everything else is injected.
+  2. Queue interface = async enqueue + polling consumer (local mimics SQS, not
+  the reverse).
+  3. Idempotent upsert on media_id — covers dupes and SQS redelivery.
+  4. node-cron in both stages; don't fake a Lambda deploy. Document it as
+  deliberate.
+
+  Want the interface signatures + the factory sketch next?
+
+✻ Worked for 34s
+
+❯ I agree on the part that let's just check what is stage variables value at    
+  the startup and rest of the code would be unaware of the stage value so to    
+  say.                                                                          
+                                                                                
+  About the queue, I think the simplest solution would be to like something     
+  similar to SQS. Like we get the, we drop the message, we will pull it from    
+  the queue, we will handle it. Maybe, yeah, we have to acknowledge it and it   
+  will be a loop, right? just like sqs                                          
+                                                                                
+  yeah also about the duplicate issue where we are according to your suggestion 
+  we are handling using on conflict and if there is a conflict of media id we   
+  will just upsert it i mean update it instead of insert we will think about it 
+  later let's not finalize this decision yet. yeah so the thing is that if we   
+  i think we have to do some more configurations here because especially for    
+  read api right that we that there is the end result so there we have to       
+  provide the newest data right and if we are fetching like if we are sending   
+  the data there according to the created at date that will be some problem     
+  right because while we update we we are just going to update the data and the 
+  updated at date not the created at date so yeah that that's why i'm saying    
+  let's keep the decision pending as of now we'll think about it later while    
+  coding                                                                        
+                                                                                
+  About using cron and this is important so let's focus on this more about      
+  using node cron in both production and and local I think it's a right         
+  approach but I think there is a issue so when I was thinking about AWS        
+  architecture I want and to know that I know event bridge, I know AWS          
+  services. If we use Node-Cron then that means that we have to deploy this     
+  into some EC2 server, right? to keep this process running and to Node-Cron to 
+  detect every 3R site but then the architecture would be not broad friendly    
+  right so we can go with like I understand that if we go with event bridge and 
+  lambda like event scheduler it would be better for production use case so     
+  the node cron would be only for local and event which will be the cron for    
+  the production we won't deploy the everything so we will just wire everything 
+  according to the AWS stack but yeah we are not chasing that it should also    
+  be live and usable let's not chase that given the time constraint that we     
+  have I was also briefly thinking about using another queue because I mean we  
+  are mimicking the sqs right so i thought that we can use some pre-existing    
+  cues like rabbit and queue but yeah they explicitly mentioned that use use    
+  sqs or in memory so yeah we are going to stick with the the queue system that 
+  I preferred earlier. Yeah.                                                    
+                                                                                
+                                                                                
+                                                                                
+  Do not assume anything. If you have any doubt, in my understanding, if you    
+  think there is some gap, ask me questions about all the decisions which I     
+  have stated earlier in above.                                                 
+
+⏺ Settled, no notes: STAGE read once at startup, rest of the code adapter-blind.
+  Queue = SQS-shaped (enqueue → poll → handle → ack → loop).
+  Dedup/created_at-vs-updated_at parked — and you're right to park it; the read
+  API orders by "creation time" per the spec, so an upsert bumping updated_at
+  mustn't reorder results. We'll resolve it when we design the table. RabbitMQ
+  correctly ruled out — spec says SQS or in-memory.
+
+  One thing you said needs a hard correction before we go further, because it
+  changes the shape of the whole thing.
+
+  node-cron → EventBridge isn't a swap. It's a different runtime.
+
+  You've now landed on: production uses EventBridge + Lambda, local uses
+  node-cron. That's the correct production design — but it breaks the "one
+  Express process with a STAGE flag" mental model, and I don't want you to
+  discover that mid-build.
+
+  In production there is no single long-running process. There are separate
+  Lambda invocations:
+  - EventBridge (schedule) → scheduler Lambda → SendMessage to SQS
+  - SQS → worker Lambda → run the sync handler
+  - API Gateway → read-API Lambda
+
+  So the honest model is:
+
+  ▎ STAGE selects adapters (Queue, Storage). It does not select topology. Local 
+  ▎ is one process wiring node-cron + in-memory queue + in-process poll loop + 
+  ▎ Express. Production is 2–3 Lambda entrypoints that import the same core 
+  ▎ services with the SQS/S3 adapters.
+
+  What makes this clean: extract the logic into framework-agnostic functions —
+  runRecentSync(deps), runTopSync(deps), the read query, MediaService. Local
+  calls them from node-cron and the poll loop; each Lambda is a thin entrypoint
+  calling the same functions. There is no "Scheduler" object in production —
+  scheduling is infra, not in-process code. Don't try to abstract it as a
+  runtime class; that's the trap.
+
+  That reframe is the gap. Everything else you said holds. Two decisions are
+  genuinely yours to make and I won't assume them:
+
+⏺ User answered Claude's questions:
+  ⎿  · How far do we build the AWS/production side, given none of it will 
+     actually be deployed? → Adapters + Lambda entrypoints (Recommended)
+     · Reviewers clone the repo but won't have your Meta token committed. How 
+     should ingestion run for them? → We will just run the process, call the 
+     APIs when the real meta token is available. If there is no token available 
+     and we will get the error, then we will just show that error to the end 
+     user saying, skipping this process, add token2.env file. We don't need any 
+     fallback or replay demo responseed here
+
+⏺ Locked. Token handling stays dead simple: no fixture, no replay. The sync
+  handler checks for the token at run time — present → call Meta; absent → log a
+  clear META token missing — skipping sync, add token to .env and return. No
+  crash, no fallback harness to build. The read API just serves whatever's in
+  Postgres (empty until a sync succeeds).
+
+  Here's the consolidated shape we've agreed to. Confirm it, and I'll flag the
+  three implementation defaults I'd otherwise just pick.
+
+  Module layout
+
+  src/
+    core/                      # adapter-blind, imported by every entrypoint
+      ports.ts                 # Queue, Storage interfaces
+      meta-client.ts           # fetch top_media/recent_media, paginate to 500
+      media-service.ts         # persist + dedup
+      sync.ts                  # runTopSync(deps), runRecentSync(deps)
+      read-media.ts            # paginated query, newest-first
+      db/                      # pool + migrations
+    adapters/
+      local/  in-memory-queue.ts, local-file-storage.ts
+      aws/    sqs-queue.ts, s3-storage.ts
+    config.ts                  # reads STAGE once -> builds deps (the ONLY
+  branch)
+    entrypoints/
+      local.ts                 # Express + node-cron + in-process poll loop
+      lambda/  scheduler.ts, worker.ts, api.ts   # thin, share core/
+
+  Flow
+
+  - Local: local.ts boots Express (read API), node-cron fires
+  queue.enqueue(SYNC_RECENT) every 3h, an in-process loop polls the in-memory
+  queue → runRecentSync. Top media synced once on startup.
+  - Production (wired, not deployed): EventBridge → scheduler.ts → SQS; SQS →
+  worker.ts → runRecentSync; API Gateway → api.ts. Same core/, adapters swapped
+  by STAGE.
+
+  Three defaults I'd pick unless you object
+
+  1. Migrations: node-pg-migrate — plain SQL up/down, no ORM. Spec wants
+  migrations, not an ORM; keeps the DB layer transparent. (Alt: Drizzle if you
+  want typed queries — heavier.)
+  2. Pagination: keyset/cursor on (created_at DESC, id DESC), not OFFSET. Stable
+  under inserts and correct on the "newest first" edge — costs no extra code.
+  3. Meta client: fetch + a page loop capped at 500, no SDK. One dependency
+  avoided.
+
+  Object to any of those, or say go and I'll scaffold core/ports.ts + config.ts
+  first so the seam is nailed before anything depends on it.
+
+✻ Worked for 2m 30s
+
+❯ Okay, I agree on the overall shape, but let's pause on folder structure       
+  architecture and also let's pause on whether we want to choose NodePG Migrate 
+  or we want to choose Fetch or Xeos. Let's keep the decision pending for now.  
+  I want to make sure that the design of the system is clear                    
+                                                                                
+  So if I summarize our decision, the pipeline that we decided was we'll get    
+  the ID, then we will fetch the post, absurd it around with the assets. yeah   
+  this was the pipeline right queue structure was simple right push into the    
+  queue, pull the queue, handle the process and then acknowledge it, it will be 
+  in a loop sort of the thing right. Scheduler will be node-cron for the        
+  local. One thing that we haven't decided yet like i'm confused about it how   
+  we how this is going to work when cron hits 3r thing so i'm thinking that     
+  when sync handlers paginate like we will absurd metadata with like like we    
+  cannot absurd the metadata download the asset url and then put it into the    
+  row it will be a very long process we have to divide it like one thing we can 
+  do is the asset would be pending meanwhile we will enqueue the downloading    
+  of the asset thing and once that acknowledgement comes back we will edit the  
+  row again right so i think this way something fails, let's say asset upload   
+  thing failed but we won't fail the entire process and we can also send this   
+  failure of asset upload into deadlater2 and try again and then update later.  
+  What would be your recommendation here?                                       
+
+⏺ Your instinct is correct — split it. Fetching metadata and transferring
+  binaries are different failure domains and shouldn't share a fate. Here's the
+  design I'd commit to, with two refinements and one gotcha you haven't hit yet.
+
+  Two job types
+
+  - SYNC_RECENT (fan-out): paginate Meta → upsert metadata rows with
+  asset_status = 'pending' → for each new/incomplete row, enqueue a FETCH_ASSET.
+  Fast, all-or-nothing on metadata only.
+  - FETCH_ASSET (per media): download from Meta's media_url → upload to storage
+  → UPDATE row with the storage URL + asset_status = 'done'. Fails in isolation,
+  retries in isolation.
+
+  Metadata lands immediately, so the read API returns rows right away with the
+  asset URL filling in async. Good.
+
+  This quietly resolves the created_at question you parked
+
+  The metadata INSERT sets created_at once. The asset job is an UPDATE that
+  touches updated_at, never created_at. So the read API ordering by created_at 
+  DESC stays stable no matter how many times the row gets updated. The two-phase
+  split is the answer to that earlier worry.
+
+  Idempotency (mandatory — SQS is at-least-once)
+
+  - Metadata: upsert on media_id.
+  - Asset job: deterministic storage key (media/{media_id}.{ext}) so a re-run
+  overwrites the same object — no orphans. And skip early if asset_status = 
+  'done' already.
+  - Re-sync every 3h overlaps heavily on recent_media; only enqueue FETCH_ASSET
+  for rows that are new or not done. Cheap, avoids re-downloading everything
+  each cycle.
+
+  DLQ / retries
+
+  - Production: free — SQS maxReceiveCount → DLQ. Zero code.
+  - Local: don't build a DLQ system. A receiveCount on the in-memory message +
+  asset_status = 'failed' after N tries is enough. // ponytail: naive retry 
+  counter, SQS handles this natively in prod.
+
+  The gotcha you'll hit: Instagram media_url expires
+
+  Meta's media_url is a short-lived signed CDN link. If a FETCH_ASSET job sits
+  in the queue or DLQ too long, the URL is dead and no amount of retrying
+  downloads it — the retry fails identically. Two implications:
+
+  1. Keep pending→download latency short. Per-media jobs enqueued right after
+  the metadata upsert, not batched for later.
+  2. On a dead URL, retrying the download is pointless; the correct recovery is
+  re-fetching the media's media_url from Meta first. For a take-home I'd not
+  build that — just let it hit failed/DLQ and note it in tradeoffs. Flagging it
+  is the judgment they're grading; building the refresh path is scope you don't
+  need.
+
+  Net pipeline
+
+  cron/EventBridge (3h)
+     └─ enqueue SYNC_RECENT
+          └─ worker: paginate Meta → upsert metadata (pending)
+               └─ per new/incomplete media: enqueue FETCH_ASSET
+                    └─ worker: download → upload → update row (done)
+                         └─ on fail: retry → DLQ → asset_status=failed
+
+  One open question this surfaces: does a failed asset still show in the read 
+  API? I'd say yes — return the row with metadata + permalink and a null storage
+  URL, rather than hiding it. The record exists; the binary just didn't
+  transfer. Agree, or should GET /hashtags only return done rows?
+
+✻ Churned for 45s
+
+❯ Yeah, I agree on the pipeline itself, but about the sync reset thing, I       
+  understand that we have 500 request cap, but that is like, just to make sure  
+  that is not our target. the logic would be something like we could paginate   
+  from newest to oldest and we will observe them and our postgres database and  
+  we will stop early like once we will cross the last sync up time right so we  
+  will do this every 3 hours so once we got the post from 0 to 3 to 3 then we   
+  will stop now at 6 we are going to fetch again but then we won't we don't     
+  have to fetch from 0 to 6 we'll just fetch 6 to 3 newest to oldest right so   
+  that is the important thing that we need to note here as checking few         
+  documentation and recent media only like returns the last 24 hours so i think 
+  work fine first but yeah push back if if you think there is some Absolutely.  
+                                                                                
+  Also i tried running the APIs and these are the responses for your reference  
+                                                                                
+  Get the hashtag ID                                                            
+  {                                                                             
+      "data": [                                                                 
+          {                                                                     
+              "id": "17843758702042126"                                         
+          }                                                                     
+      ]                                                                         
+  }                                                                             
+                                                                                
+  Get top media                                                                 
+  {                                                                             
+      "data": [                                                                 
+          {                                                                     
+              "id": "18130665154527971",                                        
+              "media_type": "CAROUSEL_ALBUM",                                   
+              "timestamp": "2026-07-13T14:07:52+0000",                          
+              "permalink": "https://www.instagram.com/p/DavGBaDDaSX/",          
+              "media_url": "https://scontent.cdninstagram.com/v/t51.82787-15/74 
+  3632871_18611406841019296_511482597068286004_n.jpg?stp=dst-jpg_e35_tt6&_nc_ca 
+  t=111&ccb=7-5&_nc_sid=18de74&efg=eyJlZmdfdGFnIjoiQ0FST1VTRUxfSVRFTS5iZXN0X2lt 
+  YWdlX3VybGdlbi5DMyJ9&_nc_ohc=bQ7F9ehAVP4Q7kNvwFJ65fo&_nc_oc=AdqVa5EvEovg0GsyJ 
+  5ncVxjp-geFfrfO6x5q2-ZEfJDq4nYuKFzUcdts73z8K7frUyo&_nc_zt=23&_nc_ht=scontent. 
+  cdninstagram.com&edm=APCawUEEAAAA&_nc_gid=RO611QluKigmMHn5Vh81cg&oh=00_AQCLpO 
+  T7ZY9CG9pXuuPJIgBwwBvNcMbjnH5waVj9Z54MDQ&oe=6A5C6BC0",                        
+              "caption": "WTF?? Ibiza edition                                   
+  🤪\n\n#wtf#matcha#ibiza#trendingpostchallenge",                               
+              "like_count": 541,                                                
+              "comments_count": 56                                              
+          },                                                                    
+          {                                                                     
+              "id": "17996486852793180",                                        
+              "media_type": "CAROUSEL_ALBUM",                                   
+              "timestamp": "2026-07-12T14:45:41+0000",                          
+              "permalink": "https://www.instagram.com/p/DasljeNk4Jp/",          
+              "media_url": "https://scontent.cdninstagram.com/v/t51.82787-15/74 
+  3016951_18602316400005345_7114426277891249985_n.jpg?stp=dst-jpg_e35_tt6&_nc_c 
+  at=111&ccb=7-5&_nc_sid=18de74&efg=eyJlZmdfdGFnIjoiQ0FST1VTRUxfSVRFTS5iZXN0X2l 
+  tYWdlX3VybGdlbi5DMyJ9&_nc_ohc=PLyYhbUwOEEQ7kNvwGrcExB&_nc_oc=Ado5XPPUgrlQD12o 
+  c-hscO4eUoHV68ebWa_BGjNVUxiT5qkxJi_sEySGa3cqzKZVrbI&_nc_zt=23&_nc_ht=scontent 
+  .cdninstagram.com&edm=APCawUEEAAAA&_nc_gid=RO611QluKigmMHn5Vh81cg&oh=00_AQDQj 
+  Dk4-VdQHw8aXpuMr5njdcphcGPqkHNDJpdQ5kUZcw&oe=6A5C6F56",                       
+              "caption": "Green flag💚\n\n#khaoyai \n#matchavibes \n#matcha     
+  #weekend",                                                                    
+              "like_count": 598,                                                
+              "comments_count": 24                                              
+          }                                                                     
+      ],                                                                        
+      "paging": {                                                               
+          "cursors": {                                                          
+              "after": "NmRhMmU5ZAGQ5MDUwNDVhYzk5MjBhNjQ5MWEwM2I1NDMZD"         
+          },                                                                    
+          "next": "https://graph.facebook.com/v25.0/17843758702042126/top_media 
+  ?user_id=user_id&fields=id,media_type,timestamp,permalink,media_url,caption,l 
+  ike_count,comments_count&limit=2&access_token=token"                          
+      }                                                                         
+  }                                                                             
+                                                                                
+                                                                                
+  Get recent media                                                              
+  {                                                                             
+      "data": [                                                                 
+          {                                                                     
+              "id": "18086699789406964",                                        
+              "media_type": "IMAGE",                                            
+              "timestamp": "2026-07-14T19:25:39+0000"                           
+          },                                                                    
+          {                                                                     
+              "id": "17969581800092192",                                        
+              "media_type": "VIDEO",                                            
+              "timestamp": "2026-07-14T19:25:36+0000"                           
+          },                                                                    
+          {                                                                     
+              "id": "18095289254363961",                                        
+              "media_type": "VIDEO",                                            
+              "timestamp": "2026-07-14T19:25:31+0000"                           
+          },                                                                    
+          {                                                                     
+              "id": "18110964359513438",                                        
+              "media_type": "VIDEO",                                            
+              "timestamp": "2026-07-14T19:25:25+0000"                           
+          },                                                                    
+          {                                                                     
+              "id": "18122054200690239",                                        
+              "media_type": "IMAGE",                                            
+              "timestamp": "2026-07-14T19:25:09+0000"                           
+          }                                                                     
+      ],                                                                        
+      "paging": {                                                               
+          "cursors": {                                                          
+              "after": "UVZAGRU5FWTJlV0pJZAVhaclRXTXhabEoyYWpFeGNUWlNhRmhUYlZAw 
+  dlV6ZAG5SMWxWVlRWTldGTkNVamRPVlVaRmRFWkJUemhLWVc5c2RVazViVjlXVEZACMVEyOU9PV3c 
+  yYVhSbFlqaGhaMmgxTUdaaVdVTXpaZAz09"                                           
+          },                                                                    
+          "next":                                                               
+  "https://graph.facebook.com/v25.0/17843758702042126/recent_media?user_id=user 
+  _id&fields=id,media_type,timestamp&limit=5&access_token=token"                
+      }                                                                         
+  }                                                                             
+                                                                                
+                                                                                
+                                                                                
+  Note that top_media APi failed with limit=5 and worked with limit=2           
+  {                                                                             
+      "error": {                                                                
+          "code": 1,                                                            
+          "message": "Please reduce the amount of data you're asking for, then  
+  retry your request"                                                           
+      }                                                                         
+  }                                                                             
+                                                                                
+                                                                                
+                                                                                
+  yeah so I think it is also about the fields and limit and not only just limit 
+  I'm not very sure let's check the documentation for this but I'm thinking     
+  about like how we can dissolve this so the simplest solution that I can       
+  recommend is if the error comes then we will half the limit and retry of      
+  course we won't go below 1 and we'll do like I think 3 or 5 retries and then  
+  we'll stop. But we need to make sure that we will commit per response or we   
+  can say per page and then we will enqueue the asething. So we won't wait to   
+  get like at least 10 or at as the response comes we will enqueue the asset    
+  down to the upload thing and then we will do the next request with limit we   
+  will we can easily do that because we have the next url present in the        
+  response we also have paging cursors present in the url as well so yeah that  
+  would be the issue too. About the carousal, so like you can see that we get   
+  the different media types and one of them is carousal album. I was checking   
+  the docs and it seems that we'll always get the one media url and it will be  
+  the cover photo for carousal album as well there won't be an array or         
+  something like that so we will use zord schema to resolve this but we don't   
+  have to handle array of images if the type is correct                         
+                                                                                
+  Push back if you think I'm wrong anywhere This is the most important part of  
+  the logic, so let's think it through before finalizing it And after this I    
+  think we can move forward to Schema Design                                    
+
+⏺ You're mostly right, and the per-page-commit instinct is exactly correct. Let
+  me verify the one load-bearing fact before I endorse the rest, because your
+  samples expose something worth confirming.
+
+⏺ Web Search("Instagram Graph API hashtag recent_media top_media supported
+            fields media_url like_count comments_count")
+  ⎿  Did 1 search in 6s
+
+⏺ Let me pull the official recent_media field list — media_url availability
+  there is load-bearing for the whole asset pipeline.
+
+⏺ Fetch(https://developers.facebook.com/docs/instagram-platform/instagram-graph-
+       api/reference/ig-hashtag/recent-media/)
+  ⎿  Received 4.9KB (200 OK)
+
+⏺ Verified against Meta's docs, and one of your assumptions is wrong in a way
+  that matters. Two corrections, then I endorse the rest.
+
+  Correction 1 — recent_media DOES support all fields
+
+  Your worry that recent_media returns fewer fields was a false alarm: your test
+  requested only fields=id,media_type,timestamp (see the next URL). The docs
+  confirm recent_media supports the full set — id, caption, media_type, 
+  media_url, permalink, timestamp, like_count, comments_count. So request all
+  fields on both endpoints and normalize into one row shape. No per-endpoint
+  schema.
+
+  Caveat: like_count is omitted when the owner hides it → optional.
+
+  Correction 2 — carousels do NOT always return media_url
+
+  You said "CAROUSEL_ALBUM always gives one cover media_url." That held in your
+  top_media sample — but the docs state media_url is "Not returned for Album",
+  and that bites on recent_media specifically (your 3-hourly path). So:
+
+  - media_url is optional/nullable in the schema. Do not assume every row has a
+  downloadable asset.
+  - No-media rows still persist metadata (caption, permalink, counts) — they
+  just get asset_status = 'no_asset' and never enqueue a FETCH_ASSET.
+
+  This is why keeping metadata and assets in separate phases was the right call
+  — a missing binary doesn't cost you the record.
+
+  Endorsed, with refinements
+
+  Incremental sync (watermark) — yes. Refine: the watermark is
+  MAX(media.timestamp) already stored for the hashtag, not created_at. Stop
+  paginating when a page crosses it; let the media_id upsert absorb boundary
+  overlap so you don't need an exact stop. One caveat to note in tradeoffs:
+  recent_media only covers ~24h, so if the app is down >24h there's an
+  unavoidable gap — not a bug, an API limit.
+
+  Adaptive limit on the payload error — yes, but tune it. The error is
+  payload-size (limit × fields), which is why limit=2 worked and 5 didn't with
+  full fields. Refinements:
+  - Start low (e.g. limit=5), don't start at 25 and fail your way down.
+  - On error, halve and re-request the same cursor (not the next page), floor at
+  1, cap ~3–5 retries, then log-and-skip that page rather than crashing the
+  sync.
+  - // ponytail: halving heuristic; the real lever is payload = limit × fields.
+
+  Per-page commit + incremental enqueue — strongly yes. Upsert each page and
+  fire its FETCH_ASSET jobs before requesting the next page. Progress is durable
+  if pagination dies mid-run, and memory stays bounded. This is the correct
+  backbone of the whole handler.
+
+  One thing you didn't mention — asset extension/content-type. VIDEO gives an
+  mp4, IMAGE/carousel-cover a jpg. Derive the extension and storage contentType
+  from the download response's Content-Type header, not from media_type — more
+  robust and one less mapping table.
+
+  Resulting schema shape (informs the next step)
+
+  - Required: media_id, media_type (IMAGE | VIDEO | CAROUSEL_ALBUM), timestamp.
+  - Optional/nullable: caption, media_url, permalink, like_count,
+  comments_count.
+  - Ours: asset_status (pending | done | failed | no_asset), storage_url,
+  created_at, updated_at.
+
+  That's the pipeline finalized. Ready to move to schema design — want me to lay
+  out the table(s) and the asset_status state transitions next?
+
+  Sources:
+  - recent_media reference — Meta
+  - top_media reference — Meta
+
+✻ Churned for 2m 26s
+
+❯ CAROUSEL_ALBUM always gives one cover media_url -- i should set this i meant  
+  that it will always return as data type string and not as array               
+  And yeah, I agree with the corrections. Just one thing to note here is that   
+  I'm not very sure that this might be the problem or not, most probably no. I  
+  was thinking that while resyncing, is it possible that for the same post that 
+  we set the no asset, there can be the URL. If yes, if there is a URL, then    
+  we have to give it and change the status to pending                           
+                                                                                
+  Everything else seems fine. But yeah, I don't think the schema shift is       
+  corrected. Let me give you my recommendation first and then we can think it   
+  through. But yeah, let's lock the pipeline part for now.                      
+
+⏺ Aligned on media_url — string, never an array. We don't touch children; done.
+
+  Your no_asset → pending question: yes, it's possible, and you're right to 
+  handle it. Two ways the same post gains a URL later:
+  1. Cross-endpoint — recent_media omits the album media_url, but top_media
+  returns it (your sample proved that). Same media_id seen in both → we can
+  upgrade.
+  2. Meta backfilling — less likely, but cheap to absorb if we merge correctly.
+
+  This actually finalizes the upsert semantics we parked. The rule is
+  fill-forward, never regress — the ON CONFLICT DO UPDATE is a conditional
+  merge, not a blind overwrite:
+
+  - media_url = COALESCE(new.media_url, old.media_url) — gain a URL, never null
+  one out.
+  - asset_status = CASE WHEN old = 'no_asset' AND new.media_url IS NOT NULL THEN
+  'pending' ELSE old END — promote only. Critically: never knock a done row
+  back to pending just because a later album payload came back with a null URL.
+  - Refresh mutable metadata (like_count, comments_count, caption) — they drift
+  over time and the payload has them anyway.
+  - created_at untouched; updated_at = now(). (This is the earlier ordering
+  worry, now closed.)
+  - Enqueue FETCH_ASSET only on insert or a no_asset→pending promotion — detect
+  via RETURNING, and lean on the worker's "skip if already done" for any stray
+  re-delivery.
+
+  No state-machine class for this — it's a COALESCE + a CASE in one upsert. // 
+  ponytail: transitions live in the SQL, not a service.
+
+  Pipeline is locked. Schema floor is yours — give me your recommendation and
+  we'll pressure-test it together.
+✻ Cogitated for 44s
+
+❯ There can be two tables right one is for hashtags and another one is for      
+  media media will be the core table and the hashtag will be attached to every  
+  row in the media table this Looks fine for the current implementation but if  
+  there is two hashtag for the same media I think in meta it is possible to     
+  give multiple hashtags right so if that is possible then we don't want to     
+  create duplicate rows just for the hashtags so what do you recommend here I   
+  think another table where we join the hashtag and the media would be ideal    
+  right?                                                                        
+
+⏺ Your instinct is correct — the junction table is the right model, and I'd take
+  it. But let me be honest about why, because "future multi-hashtag support" is
+  speculative for a matcha-only tracker and I don't want to sell you
+  future-proofing you didn't ask for.
+
+  The real justification is simpler: media_id is globally unique in Meta's 
+  model, and the dedup requirement forces media to be keyed on it. Once media is
+  global, hashtag membership is a fact about the relationship, not a column on
+  the post. Putting hashtag_id on the media row bakes in "this post belongs to
+  one hashtag" — which is wrong the moment a post carries #matcha #matchalatte,
+  and annoying to unwind later. The junction is two columns and an index. That's
+  the one place I'll spend a table on correctness over pure YAGNI, because the
+  cost is near-zero and the wrong choice is sticky.
+
+  Three tables
+
+  hashtags
+    id              (our PK)
+    ig_hashtag_id   TEXT   -- 17843758702042126, from ig_hashtag_search
+    name            TEXT   -- 'matcha'
+    watermark       TIMESTAMPTZ  -- max media.timestamp seen; drives incremental
+  sync
+    ...timestamps
+
+  media                       -- the core table, one row per real post
+    media_id        TEXT PK   -- Meta's global id; dedup lives here
+    media_type, timestamp, caption, permalink,
+    media_url, like_count, comments_count,
+    asset_status, storage_url,
+    created_at, updated_at
+
+  hashtag_media               -- junction
+    hashtag_id  FK -> hashtags(id)
+    media_id    FK -> media(media_id)
+    PRIMARY KEY (hashtag_id, media_id)
+
+  Three things worth locking while we're here:
+
+  1. media_id as TEXT, not bigint. 18130665154527971 fits in bigint today, but
+  Meta ids are opaque strings — don't assume they stay numeric or in range. TEXT
+  PK, dedup is INSERT ... ON CONFLICT (media_id).
+  2. Watermark lives on hashtags, not derived by scanning media. This is the
+  second reason the hashtags table earns its keep beyond M2M — it's the home for
+  per-hashtag sync state (watermark, and the ig_hashtag_id so we don't re-call
+  ig_hashtag_search every run). Even with one hashtag, that bookkeeping is real
+  work the table does today.
+  3. Junction upsert is ON CONFLICT DO NOTHING. Re-syncs re-assert the same
+  (matcha, media_id) pair harmlessly.
+
+  The read API then joins media ⋈ hashtag_media filtered by hashtag, ordered
+  media.created_at DESC — keyset paginated on (created_at, media_id). Single
+  hashtag today, but the query shape is already right.
+
+  One question back at you, since you're driving the schema: do you want the 
+  watermark as a single column on hashtags, or split last_top_synced_at / 
+  last_recent_synced_at? Top runs once, recent runs every 3h — one watermark
+  covers both if we only gate the recent sweep, which I think is all we need.
+  Your call.
+
+✻ Brewed for 1m 3s
+
+❯ yeah makes sense but about the                                                
+  media_url - it can be nulled after we download the url, right ? I don't think 
+  it makes the huge difference or not, but I think we can do this.              
+  asset_status - is enum - pending / done / failed / no_asset                   
+  children - Earlier I asked you to drop the children because it doesn't really 
+  matter for our read API right and it will also increase the call. Anyways we  
+  are getting the cover image in media URL. So I think it would be okay if we   
+  don't fetch the children images right.                                        
+  like_count, comments_count - If we get the different data then we will absurd 
+  it and we won't create the new rule for now, we don't meet the time history   
+  or or like period on how Gradually likes and comment increase. So I think we  
+  just eat the latest data here.                                                
+                                                                                
+                                                                                
+  I don't really understand the question on watermark. Like, by watermark, do   
+  you mean what is their newest post being fetched? I think you mean that you   
+  don't want to refetch the post again and again if we have already fetched it  
+  before the 3R winter, right? I don't think that is the good idea to do it     
+  here. The whole decision of absurd on conflict was because of this only,      
+  right? if we get any fresh data we won't create the new row instead we will   
+  just update the row the recent api itself gives last 24 hours data so we are  
+  not fetching indefinitely here we are just getting last 24 hours data and     
+  adding the columns if there are none and up sorting the existing one why do   
+  we need the watermark or like any column here i don't understand the          
+  requirement so upserting won't re-download the asset right we already have    
+  the asset so we'll just update the data which we we just changed there is no  
+  option in meta to change the media once changed so there is no no issue about 
+  media url being changed but comment count can be changed so we will just      
+  update that                                                                   
+
+⏺ You understood the watermark correctly, and your pushback is right. Let me
+  explain what it would have bought, then concede — because it doesn't hold up
+  here.
+
+  Watermark — you're right, drop it
+
+  Yes: a watermark = "timestamp of the newest post from the last sync," used to
+  stop paginating early once a page's timestamps fall below it. Its only job is
+  cutting redundant API calls — it has nothing to do with dedup (upsert handles
+  that) or re-download (asset_status handles that). You saw that clearly.
+
+  And here's why it's not worth it, which is the argument that kills it:
+
+  - Dedup and no-re-download are already guaranteed by upsert + status, exactly
+  as you said. Correctness needs zero extra state.
+  - The early-stop is a pure API-call optimization, and it's moot in both volume
+  regimes:
+    - High-volume hashtag (matcha likely is): the 500 cap hits before you ever
+  paginate back to already-seen posts → early-stop never triggers.
+    - Low-volume: there are few posts, so re-fetching the overlap is cheap
+  anyway.
+  - Even if we did want it, the stop condition is derivable from MAX(timestamp)
+  already in the media table — storing a separate watermark column is
+  denormalized state that can drift out of sync with reality. Classic thing to
+  not persist.
+
+  So: no watermark column, no separate sync-state. Every 3h we sweep
+  recent_media newest-first up to 500 and upsert. Simpler and correct. // 
+  ponytail: no early-stop; 500-cap makes it moot and upsert handles the overlap.
+
+  The hashtags table still earns its place though — it holds ig_hashtag_id (so
+  we don't re-call ig_hashtag_search every run) and name, and it's the FK parent
+  of the junction. It just loses the watermark column. Nets out simpler than
+  what I proposed.
+
+  The rest
+
+  - media_url nulling after download: don't bother. It's an extra write for no
+  gain — and the next resync's COALESCE(new, old) would just refill it from the
+  fresh payload anyway. Store what Meta sends, ignore it once asset_status = 
+  'done'. Less code.
+  - asset_status enum (pending | done | failed | no_asset): locked.
+  - children: dropped, agreed — cover image in media_url is enough, and it
+  avoids the extra call.
+  - like_count / comments_count: latest-value only, no history table. Agreed.
+
+  One small factual correction so it doesn't bite you later: the media content
+  can't change, but Meta's media_url is a signed CDN link that rotates/expires.
+  Your conclusion is still right — since we download once and never re-fetch
+  done rows, the rotation never affects us. Just don't be surprised when the
+  same post shows a different media_url string across syncs.
+
+  Schema's effectively locked: hashtags (id, ig_hashtag_id, name) + media (core,
+  keyed on media_id) + hashtag_media junction. Want to move to the read API
+  contract next — pagination shape, response fields, and what we expose vs hide?
+
+✻ Brewed for 1m 22s
+
+❯ before going to API contract. Let's just finalize the tech stack one time.    
+  Runtime: Node + TypeScript, pnpm                                              
+  Web: Express                                                                  
+  DB: Postgres, pg, node-pg-migrate, lets not use any IORM                      
+  Validation: Zod                                                               
+  Queue: in-memory/SQS                                                          
+  Storage: local/S3                                                             
+  Scheduler: node-cron local/EventBridge                                        
+  Logging: console + some helper if needed                                      
+  Tests: a few on core logic                                                    
+  docker                                                                        
+
+⏺ Stack's solid. Confirming it, with four sub-picks you didn't name that I'd
+  default rather than make you decide:
+
+  Confirmed as-is: Node+TS, pnpm, Express, Postgres/pg/node-pg-migrate (no ORM),
+  Zod, in-memory/SQS, local/S3, node-cron/EventBridge, Docker.
+
+  Four defaults I'd lock (object if you disagree):
+
+  1. Meta client → native fetch (Node 20+ global), not axios. This was parked
+  earlier — closing it. We're doing manual pagination + halving-retry anyway, so
+  axios's interceptors buy nothing. Zero deps.
+  2. Test runner → node:test + tsx, not vitest/jest. Stdlib, zero deps, runs TS
+  directly. "A few tests on core logic" doesn't justify pulling a framework. // 
+  ponytail: stdlib test runner, add vitest only if we outgrow it.
+  3. Logging → plain console, no library. It's a single-process app + Lambdas;
+  console already lands in CloudWatch as-is. A 10-line helper for a consistent
+  prefix/level is fine; pino/winston is not. Skip until proven needed.
+  4. Config → Node's built-in --env-file, not dotenv. Reads .env natively on
+  Node 20+. One less dep.
+
+  Implied deps to name now (from choices already made):
+  - AWS side: @aws-sdk/client-sqs, @aws-sdk/client-s3, and serverless-http for
+  wrapping Express in the API Lambda. These only load in the aws
+  adapters/entrypoints — the local path never imports them.
+  - Dev/build: tsx for local run, tsc for typecheck. Lambda bundling via esbuild
+  when we get to entrypoints (not needed to run locally).
+
+  Docker shape: docker compose up → Postgres + app; migrations run on boot
+  before the server starts. One command for reviewers.
+
+  That's the whole dependency surface: express, pg, node-pg-migrate, zod,
+  node-cron, plus the three AWS packages that stay out of the local path. Lean.
+
+  Good to lock? Then read API contract next.
+
+✻ Sautéed for 33s
+
+❯ we must use vitest, use dotenv                                                
+  lock now                                                                      
+
+⏺ Locked. Final stack:
+
+  - Runtime: Node + TypeScript, pnpm
+  - Web: Express
+  - DB: Postgres, pg, node-pg-migrate — no ORM
+  - Validation: Zod
+  - Queue: in-memory (local) / SQS (prod)
+  - Storage: local FS (local) / S3 (prod)
+  - Scheduler: node-cron (local) / EventBridge (prod)
+  - Meta client: native fetch
+  - Config: dotenv
+  - Logging: console (+ thin helper if needed)
+  - Tests: vitest, on core logic
+  - AWS deps (aws path only): @aws-sdk/client-sqs, @aws-sdk/client-s3,
+  serverless-http
+  - Docker: compose → Postgres + app, migrations on boot
+
+  On to the read API contract. GET /hashtags — before I propose, one framing
+  question: the path is /hashtags but it returns media. Do you read that as
+  "media for the (single, matcha) hashtag," or do you want it parameterized
+  (/hashtags/:name/media)? The spec says exactly GET /hashtags, so I lean
+  literal — one endpoint, returns matcha's media, newest first. Confirm and I'll
+  lay out pagination + response fields.
+
+✻ Brewed for 20s
+
+❯ we can create GET /hashtags                                                   
+                                                                                
+  Query params will be limit as this is paginated                               
+  we must provide other options in query params as well like "where to resume   
+  from"                                                                         
+  response would be {data : [...], next:"..."}                                  
+  Response should also send valid response fpr all the edge cases like out of   
+  limit or Invalid value in params etc                                          
+
+⏺ GET /hashtags contract:
+
+  Query params
+
+  ┌────────┬────────┬─────────┬──────────────────────────────────────────────┐
+  │ Param  │  Type  │ Default │                    Rules                     │
+  ├────────┼────────┼─────────┼──────────────────────────────────────────────┤
+  │ limit  │ int    │ 25      │ 1–100. >100 → clamped to 100. Non-numeric /  │
+  │        │        │         │ <1 → 400                                     │
+  ├────────┼────────┼─────────┼──────────────────────────────────────────────┤
+  │ cursor │ string │ —       │ Opaque token = "where to resume from".       │
+  │        │        │         │ Malformed → 400                              │
+  └────────┴────────┴─────────┴──────────────────────────────────────────────┘
+
+  Why an opaque cursor, not raw after_id: keyset pagination needs both
+  created_at and the media_id tiebreaker (posts can share a timestamp). Encoding
+  both into one base64 token means the client can't send an inconsistent pair —
+  they just echo back what we gave them. cursor = 
+  base64url("{created_at}|{media_id}").
+
+  Response
+
+  {
+    "data": [
+      {
+        "media_id": "18130665154527971",
+        "media_type": "CAROUSEL_ALBUM",
+        "timestamp": "2026-07-13T14:07:52Z",   // IG post time
+        "caption": "WTF?? Ibiza edition 🤪 #matcha",
+        "permalink": "https://www.instagram.com/p/DavGBaDDaSX/",
+        "storage_url": "http://localhost:3000/media/18130665154527971.jpg",
+        "asset_status": "done",                 // done | pending | failed | 
+  no_asset
+        "like_count": 541,
+        "comments_count": 56,
+        "created_at": "2026-07-14T09:12:00Z"    // our ingest time; ordering key
+      }
+    ],
+    "next": "MjAyNi0wNy0xM3wxODEz..."           // cursor for next page, or null
+  }
+
+  Exposed vs hidden — the judgment call the assignment wants
+
+  - Expose: media_id, media_type, timestamp, caption, permalink, storage_url,
+  asset_status, like_count, comments_count, created_at.
+  - Hide media_url (Meta's CDN link): it's a signed, rotating, already-expired
+  URL — serving it would hand clients dead links. We expose our storage_url
+  instead. storage_url is null while asset_status is pending/failed/no_asset.
+  - Hide updated_at and internal PKs — no client value.
+  - Expose asset_status so a client knows a null storage_url is "not ready," not
+  "broken." Honest over hidden.
+
+  Pagination mechanics
+
+  - Query: WHERE (created_at, media_id) < (cursor.created_at, cursor.media_id) 
+  ORDER BY created_at DESC, media_id DESC LIMIT limit + 1.
+  - Fetch limit + 1; if we get the extra row, there's a next page → next =
+  cursor of the last kept row, return the first limit. No COUNT(*) needed.
+
+  Edge cases → status
+
+  ┌─────────────────────────────┬───────────────────────────────────────────┐
+  │            Case             │                 Response                  │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ Valid request               │ 200 { data, next }                        │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ limit > 100                 │ 200, clamped to 100                       │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ Bad limit (abc, -1, 0)      │ 400 { error: "limit must be an integer    │
+  │                             │ 1–100" }                                  │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ Malformed/undecodable       │ 400 { error: "invalid cursor" }           │
+  │ cursor                      │                                           │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ Cursor valid but past the   │ 200 { data: [], next: null }              │
+  │ end                         │                                           │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ No media at all             │ 200 { data: [], next: null }              │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ Unknown query params        │ ignored (Zod strips them)                 │
+  └─────────────────────────────┴───────────────────────────────────────────┘
+
+  All param parsing goes through one Zod schema at the route boundary; a parse
+  failure maps to 400 with the Zod message. // ponytail: one schema guards the 
+  edge cases, no hand-rolled validation.
+
+  Object to anything, or this locks the contract and we've fully specced the
+  system — ready to scaffold when you are.
+
+✻ Brewed for 47s
+
+❯ Looks good to me. Just one change. If we don't store the storage URL, it will 
+  store the storage key and we will derive the storage URL at the read time     
+                                                                                
+  failed and no_asset meaning is different. no_asset means that we never had a  
+  downloadable asset                                                            
+                                                                                
+  changee cursor field next_cursor and datatype would be timestamp              
+
+⏺ First two: agreed, and both are improvements.
+
+  1. Store storage key, derive URL at read time. Better — the host/bucket/CDN
+  can change without a data migration, and the local-vs-S3 URL shape stays a
+  pure function of the adapter. The Storage port grows a getUrl(key) that the
+  read serializer calls. DB holds storage_key; response still returns a resolved
+  storage_url.
+  2. failed ≠ no_asset. Correct, and that distinction was already the intent —
+  pinning it down: no_asset = Meta never gave a downloadable media_url (e.g.
+  recent_media album); failed = we had a URL but download/upload errored through
+  all retries → DLQ. Both keep the metadata row; only the reason differs.
+  3. Rename to next_cursor: yes. Datatype = timestamp: I have to push back — 
+  this one's a real bug, not a style choice.
+
+  A bare timestamp cursor breaks keyset pagination whenever rows share the
+  ordering value — and with our design that's the common case, not an edge one:
+
+  - created_at defaults to now(), and in Postgres now() returns the transaction 
+  start time — identical for every row inserted in the same statement.
+  - We insert per page, in batches. So an entire page of media gets the same
+  created_at.
+  - With a timestamp-only cursor: WHERE created_at < :ts skips the rest of that
+  same-timestamp batch on the next page; <= re-returns rows you already saw.
+  Guaranteed dup-or-skip at every batch boundary.
+
+  The tiebreaker (media_id) is what makes it correct, so the cursor has to carry
+  both values. Two ways to keep your next_cursor field and stay correct:
+
+  - Recommended — next_cursor stays an opaque token encoding (created_at, 
+  media_id), base64url. Same field name, client just echoes it back. This is
+  what Stripe/Slack cursors are; "timestamp-ish" but safe.
+  - If you want a literal timestamp value for readability: switch created_at to
+  clock_timestamp() (per-row microsecond time, not transaction time) so rows are
+  effectively unique. Still carries a small collision risk under concurrent
+  inserts, so I'd only take this if the opaque token is a dealbreaker.
+
+  My call: keep next_cursor as the opaque token. You get the rename,
+  correctness, and a client that can't construct an inconsistent cursor. Want it
+  that way, or do you specifically want the raw-timestamp version with
+  clock_timestamp()?
+
+✻ Churned for 1m 4s
+
+❯ yeah makes sense i meant that when we like decrypt the token we create the    
+  created as timestamp and not string yeah the next cursor stays the base64     
+  only                                                                          
+                                                                                
+  also note that we Order by created_at                                         
+
+⏺ Right — decode the token, cast created_at to a real timestamptz (and media_id
+  stays TEXT) so the comparison is WHERE (created_at, media_id) < 
+  ($ts::timestamptz, $id) ORDER BY created_at DESC, media_id DESC. A token whose
+  timestamp half doesn't parse → the existing 400 invalid cursor. media_id is
+  only the tiebreaker; ordering is created_at DESC, locked.
+
+  That's the whole system specced end to end:
+
+  - Stack locked.
+  - Pipeline: SYNC_RECENT/SYNC_TOP → per-page upsert (metadata, no_asset when no
+  URL) → per-media FETCH_ASSET → download → upload → store storage_key + done.
+  Adaptive limit-halving on payload errors; per-page commit; DLQ native in SQS,
+  retry-count locally.
+  - Schema: hashtags (id, ig_hashtag_id, name) + media (core, PK media_id,
+  fill-forward upsert, asset_status enum) + hashtag_media junction. No
+  watermark.
+  - Adapters: STAGE branches once in a composition root; Queue/Storage ports;
+  node-cron local / Lambda+EventBridge+SQS+S3 wired-not-deployed.
+  - API: GET /hashtags, keyset on (created_at DESC, media_id DESC), opaque
+  next_cursor, { data, next_cursor }, Zod-guarded params, edge cases mapped.
+
+  Say the word and I'll scaffold — I'd start with core/ports.ts + the
+  composition root so the seam is nailed before anything depends on it, then
+  migrations, then the pipeline, then the route.
+
+✻ Cooked for 18s
