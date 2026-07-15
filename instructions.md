@@ -52,12 +52,19 @@ log `META token missing — add token to .env` and skip.
 - **Carousel children not fetched.** Only the cover image (`media_url`) is stored.
 - **Engagement counts are latest-value only.** No history/time-series.
 - **No Meta fixture/replay.** Real API when a token is present; skip + log otherwise.
-- **Single worker, one queue.** Assets download serially — a slow video blocks the
-  jobs behind it, but this only delays *asset availability*, never metadata (committed
-  per page) or the read API. Scaling is additive, not a redesign: a `concurrency`
-  option on the consumer, or splitting into a serial *sync* queue + a parallel *asset*
-  queue (two SQS queues + two Lambdas in prod). Not built — one worker is sufficient
+- **Queue carries only asset downloads; syncs run directly.** Syncs run as a plain call
+  (boot / cron), never through the queue — so a long sync and a big download never block
+  each other, and there's no risk of a minutes-long job exceeding an SQS visibility timeout
+  and being redelivered. With one worker, assets download serially: a slow video only delays
+  *asset availability*, never metadata (committed per page) or the read API. Scaling is
+  additive — raise asset concurrency / add consumers (Lambda). Not built; one worker suffices
   at assignment scale.
+- **A very large sync would need cursor-chained page jobs.** A sync paginates in one direct
+  run — fine for ~500 items / a few pages. If a hashtag ever fanned out so far that one run
+  risked the SQS visibility timeout, pagination would split into per-page jobs that re-enqueue
+  the next `after` cursor (each unit short, retried per page). That needs FIFO + dedup (or a DB
+  cursor guard) so at-least-once redelivery can't fork the chain into parallel paginations.
+  Deferred — unnecessary at this scale.
 - **Local storage atomic write assumes a single writer.** `put` streams to a fixed
   `{key}.tmp` then renames (atomic publish). Safe with one worker — one write per key
   at a time. With multiple workers, SQS at-least-once redelivery could have two writers
