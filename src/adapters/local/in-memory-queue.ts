@@ -38,6 +38,7 @@ export class InMemoryQueue implements Queue {
   consume(handler: (job: Job) => Promise<void>): void {
     if (this.running) throw new Error("consume() already started");
     this.running = true;
+    console.log("[queue] consumer started — polling for jobs");
     void this.loop(handler);
   }
 
@@ -53,6 +54,9 @@ export class InMemoryQueue implements Queue {
         await sleep(this.pollIntervalMs);
         continue;
       }
+      const desc =
+        message.job.type === "FETCH_ASSET" ? `FETCH_ASSET ${message.job.mediaId}` : message.job.type;
+      console.log(`[queue] handling ${desc}`);
       try {
         await handler(message.job); // handle → ack (already removed)
       } catch (err) {

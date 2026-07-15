@@ -59,6 +59,7 @@ export async function handleFetchAsset(mediaId: string, ctx: AssetContext): Prom
   }
 
   try {
+    console.log(`[asset] ${mediaId}: downloading ${row.media_url.slice(0, 60)}…`);
     const res = await fetch(row.media_url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
     if (!res.ok || !res.body) throw new Error(`download failed with HTTP ${res.status}`);
 

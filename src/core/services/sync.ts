@@ -36,6 +36,7 @@ async function runSync(kind: SyncKind, ctx: SyncContext): Promise<void> {
     }
 
     const hashtagId = await ensureHashtag(ctx.pool, { igHashtagId, name: ctx.hashtagName });
+    console.log(`[sync] ${label}: resolved #${ctx.hashtagName} (${igHashtagId}) — paginating media`);
     const pages =
       kind === "top" ? fetchTopMedia(igHashtagId, ctx.meta) : fetchRecentMedia(igHashtagId, ctx.meta);
 
@@ -50,6 +51,9 @@ async function runSync(kind: SyncKind, ctx: SyncContext): Promise<void> {
         await ctx.queue.enqueue({ type: "FETCH_ASSET", mediaId });
       }
       queued += toFetch.length;
+      console.log(
+        `[sync] ${label}: page ${pageCount} — ${page.length} media, ${toFetch.length} assets queued (running total ${mediaCount} media, ${queued} queued)`,
+      );
     }
 
     console.log(
