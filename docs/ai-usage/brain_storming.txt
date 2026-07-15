@@ -10,6 +10,8 @@
 │   ~/Developer/personal/saral-assignment   │                                  │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 
+==============BRAINSTORMING CHAT HISTORY==============
+
 
 ❯ I need help with an assignment. problem statment is in @problem-statement.md  
                                                                                 
