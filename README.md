@@ -1,5 +1,7 @@
 # Hashtag Tracking Pipeline
 
+📹 **[Watch the demo video](https://drive.google.com/file/d/1mQYPgBViF11pW6UyqH-m4p0os-on1Fvu/view?usp=sharing)** — the full pipeline running end to end.
+
 Ingestion pipeline for Instagram hashtag media (`matcha`): fetch from Meta's Graph API,
 store metadata in Postgres, download assets to storage, dedup, and expose a paginated
 read API. Recent media re-syncs every 3 hours.

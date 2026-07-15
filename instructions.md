@@ -4,6 +4,8 @@ Hashtag tracking pipeline for Instagram `matcha` media. Full architecture and
 decision record: [docs/DESIGN.md](docs/DESIGN.md). AI usage and chat exports are in
 the [ai-usage](#ai-usage) section below.
 
+Demo video: [watch the pipeline run end to end](https://drive.google.com/file/d/1mQYPgBViF11pW6UyqH-m4p0os-on1Fvu/view?usp=sharing).
+
 ## setup
 
 ```bash
