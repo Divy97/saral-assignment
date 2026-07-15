@@ -23,7 +23,7 @@ builds the concrete adapters and injects them. Nothing downstream reads `STAGE`.
 | Scheduler  | node-cron                    | EventBridge → Lambda                |
 | Runtime    | one Express process          | Lambda entrypoints sharing `core/`  |
 
-**Key insight:** `STAGE` selects *adapters*, not *topology*. Local is one
+**Key insight:** `STAGE` selects *adapters*, not *how the whole thing runs*. Local is one
 long-lived process. Production is 2–3 Lambda entrypoints (scheduler, SQS worker,
 API) that import the same `core/` services with SQS/S3 adapters. Scheduling in
 production is infra (an EventBridge rule), not an in-process object — so there is
@@ -59,10 +59,17 @@ src/
   config.ts                 # reads STAGE ONCE -> builds & injects adapters
   entrypoints/
     local.ts                # Express + node-cron + in-process poll loop
-    lambda/
-      scheduler.ts          # EventBridge -> runRecentSync directly (not via the queue)
-      worker.ts             # SQS -> runRecentSync / asset handler
-      api.ts                # API Gateway -> Express via serverless-http
+```
+
+The production setup below is **documented, not written** — there are no Lambda
+entrypoint files. The seams that make them a thin wiring layer *do* exist (the
+SQS/S3 adapters, and `core/` services that take injected deps), so the prod path is:
+
+```
+  entrypoints/lambda/        # NOT built — the shape a prod deploy would take
+    scheduler.ts             # EventBridge -> runRecentSync directly (not via the queue)
+    worker.ts                # SQS -> asset handler
+    api.ts                   # API Gateway -> Express (e.g. serverless-http)
 ```
 
 `db/` moved out of `core/` — the pool and migrations are infrastructure, not
@@ -183,8 +190,16 @@ the page rather than failing the whole sync.
 
 `GET /hashtags` — stored media, newest first.
 
-**Query params:** `limit` (int, default 25, 1–100, `>100` clamped, bad → 400),
-`next_cursor` (opaque base64url token; malformed → 400).
+**Ordering — `posted_at`, not `created_at`.** The spec says "descending order of
+creation time." We read that as the post's creation time (`posted_at`, Meta's
+`timestamp`), not our ingest time (`created_at`). Reason: a bulk sync inserts a
+whole page within the same second, so `created_at` collapses to near-ties and the
+order within a sync degrades to `media_id`; `posted_at` is the stable, meaningful
+"newest posts first" a consumer expects. `created_at` is still stored (audit) and
+could back a second ordering if ever needed.
+
+**Query params:** `limit` (int, default 25, 1–100; `<1` or `>100` → 400, not
+clamped), `next_cursor` (opaque base64url token; malformed → 400).
 
 **Pagination:** keyset on `(posted_at DESC, media_id DESC)` — newest posts first.
 The cursor encodes both values (a bare timestamp is unsafe — posts can share a
