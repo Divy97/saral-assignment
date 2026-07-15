@@ -84,3 +84,6 @@ pnpm build          # compile to dist/
 
 - [`instructions.md`](./instructions.md) — setup, environment variables, tradeoffs, AI usage
 - [`docs/DESIGN.md`](./docs/DESIGN.md) — architecture, data model, pipeline, known limitations
+- **AI usage** — how I used AI ([`instructions.md#ai-usage`](./instructions.md#ai-usage)) plus the
+  exported chat history: [brainstorming](./docs/ai-usage/brain_storming.txt) and
+  [implementation](./docs/ai-usage/implementation.txt)
