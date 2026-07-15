@@ -28,6 +28,7 @@ services:
       # supplied from the project-root .env (compose interpolates it); empty -> syncs skip
       META_ACCESS_TOKEN: ${META_ACCESS_TOKEN:-}
       META_USER_ID: ${META_USER_ID:-}
+      META_MAX_ITEMS: ${META_MAX_ITEMS:-}
       SYNC_CRON: ${SYNC_CRON:-0 */3 * * *}
       MEDIA_DIR: /app/media
       PUBLIC_BASE_URL: http://localhost:3000

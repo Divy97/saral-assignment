@@ -12,6 +12,7 @@ const deps = await buildDeps(); // reads STAGE once -> { stage, pool, queue, sto
 const meta: MetaConfig = {
   accessToken: process.env.META_ACCESS_TOKEN ?? "",
   userId: process.env.META_USER_ID ?? "",
+  maxItems: Number(process.env.META_MAX_ITEMS) || 500, // per-sync cap; spec target 500, lower for a quick demo
 };
 const hashtagName = process.env.HASHTAG ?? "matcha";
 const mediaDir = process.env.MEDIA_DIR ?? "./media";
